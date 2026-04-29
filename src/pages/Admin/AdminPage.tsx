@@ -1,4 +1,4 @@
-import { useState, FormEvent } from 'react';
+import { useState, FormEvent, useEffect, useCallback } from 'react';
 import { 
   Users, 
   CheckCircle2, 
@@ -18,39 +18,125 @@ import {
 import { cn, formatCurrency } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../../lib/supabase';
+
+interface SystemSettings {
+  regBonus: number;
+  minWithdrawal: number;
+  maintenanceMode: boolean;
+  referralCommission: number;
+}
 
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('Withdrawals');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
-  const [systemSettings, setSystemSettings] = useState({
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState([
+    { label: 'Total Users', value: '0', icon: Users, color: 'bg-blue-50 text-blue-600' },
+    { label: 'Pending Payouts', value: formatCurrency(0), icon: ArrowUpRight, color: 'bg-emerald-50 text-emerald-600' },
+    { label: 'Active Tasks', value: '0', icon: CheckCircle2, color: 'bg-purple-50 text-purple-600' },
+    { label: 'System Alerts', value: '0', icon: AlertCircle, color: 'bg-red-50 text-red-600' },
+  ]);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>({
     regBonus: 5000,
     minWithdrawal: 1000,
     maintenanceMode: false,
     referralCommission: 10,
   });
 
-  const handleUpdateSettings = (e: FormEvent) => {
+  const fetchAdminData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Fetch user count
+      const { count: userCount, error: userError } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true });
+
+      // Fetch active tasks count
+      const { count: taskCount, error: taskError } = await supabase
+        .from('tasks')
+        .select('*', { count: 'exact', head: true });
+
+      // Fetch pending withdrawals (mock for now since we don't have withdrawals table yet)
+      // but we could try to query transactions if they exist
+      
+      setStats([
+        { label: 'Total Users', value: (userCount || 0).toLocaleString(), icon: Users, color: 'bg-blue-50 text-blue-600' },
+        { label: 'Pending Payouts', value: formatCurrency(0), icon: ArrowUpRight, color: 'bg-emerald-50 text-emerald-600' },
+        { label: 'Active Tasks', value: (taskCount || 0).toLocaleString(), icon: CheckCircle2, color: 'bg-purple-50 text-purple-600' },
+        { label: 'System Alerts', value: '0', icon: AlertCircle, color: 'bg-red-50 text-red-600' },
+      ]);
+
+      // Fetch settings (mock table name 'settings')
+      const { data: settingsData } = await supabase.from('settings').select('*').single();
+      if (settingsData) {
+        setSystemSettings({
+          regBonus: settingsData.reg_bonus,
+          minWithdrawal: settingsData.min_withdrawal,
+          maintenanceMode: settingsData.maintenance_mode,
+          referralCommission: settingsData.referral_commission,
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching admin data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAdminData();
+  }, [fetchAdminData]);
+
+  const handleUpdateSettings = async (e: FormEvent) => {
     e.preventDefault();
-    toast.success('System Matrix Synchronized');
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert({
+          id: 1, // Assume single row for settings
+          reg_bonus: systemSettings.regBonus,
+          min_withdrawal: systemSettings.minWithdrawal,
+          maintenance_mode: systemSettings.maintenanceMode,
+          referral_commission: systemSettings.referralCommission,
+          updated_at: new Date().toISOString()
+        });
+
+      if (error) throw error;
+      toast.success('System Matrix Synchronized');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to update settings');
+    }
   };
 
-  const handleUploadSubmit = (e: FormEvent) => {
+  const handleUploadSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setIsUploading(true);
-    setTimeout(() => {
-      setIsUploading(false);
-      setShowUploadModal(false);
-      toast.success('Skill Invest created successfully!');
-    }, 2000);
-  };
+    
+    // Simulate DB insert for new course
+    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const newCourse = {
+      title: formData.get('title'),
+      price: Number(formData.get('price')),
+      max_earning: Number(formData.get('max_earning')),
+      image: formData.get('image'),
+      created_at: new Date().toISOString()
+    };
 
-  const stats = [
-    { label: 'Total Users', value: '12,450', icon: Users, color: 'bg-blue-50 text-blue-600' },
-    { label: 'Pending Payouts', value: formatCurrency(450000), icon: ArrowUpRight, color: 'bg-emerald-50 text-emerald-600' },
-    { label: 'Active Tasks', value: '24', icon: CheckCircle2, color: 'bg-purple-50 text-purple-600' },
-    { label: 'System Alerts', value: '2', icon: AlertCircle, color: 'bg-red-50 text-red-600' },
-  ];
+    try {
+      const { error } = await supabase.from('courses').insert(newCourse);
+      if (error) throw error;
+      
+      toast.success('Skill Invest created successfully!');
+      setShowUploadModal(false);
+      fetchAdminData();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to create course');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   return (
     <div className="space-y-10 pb-20">

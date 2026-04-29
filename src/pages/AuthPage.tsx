@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { toast } from 'react-hot-toast';
+import { supabase } from '../lib/supabase';
 
 interface AuthPageProps {
   onLogin: (user: any) => void;
@@ -39,34 +40,58 @@ export default function AuthPage({ onLogin }: AuthPageProps) {
     setLoading(true);
 
     try {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      if (isSignUp) {
+        const { data: authData, error: signUpError } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              display_name: formData.displayName,
+            },
+          },
+        });
 
-      const mockUser = {
-        id: Math.random().toString(36).substr(2, 9),
-        email: formData.email || 'demo@nezora.com',
-        displayName: formData.displayName || 'Nexus Agent',
-        wallet: {
-          main: 0,
-          bonus: isSignUp ? 5000 : 500,
-          referral: 0,
-          investment: 0
-        },
-        bankProfile: {
-          accountNumber: '',
-          bankName: '',
-          accountName: '',
-          isVerified: false
-        },
-        referralCode: Math.random().toString(36).substr(2, 6).toUpperCase(),
-        role: formData.email.includes('admin') ? 'admin' : 'user',
-        createdAt: Date.now()
-      };
+        if (signUpError) throw signUpError;
 
-      onLogin(mockUser);
-      toast.success(isSignUp ? 'Neural Network Connected: Welcome Bonus Loaded' : 'Nexus Authority Authenticated');
+        if (authData.user) {
+          // Create profile record
+          const { error: profileError } = await supabase
+            .from('profiles')
+            .insert({
+              id: authData.user.id,
+              display_name: formData.displayName,
+              email: formData.email,
+              wallet: {
+                main: 0,
+                bonus: 5000,
+                referral: 0,
+                investment: 0
+              },
+              referral_code: Math.random().toString(36).substr(2, 6).toUpperCase(),
+              role: formData.email.includes('admin') ? 'admin' : 'user',
+            });
+          
+          if (profileError) {
+             console.error('Profile creation error:', profileError);
+             // Even if profile fails, user is created. We'll handle retrieval in App.tsx
+          }
+
+          toast.success('Neural Network Connected: Welcome Bonus Loaded');
+        }
+      } else {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+
+        if (signInError) throw signInError;
+        toast.success('Nexus Authority Authenticated');
+      }
+      
+      // onLogin will be handled by the onAuthStateChanged listener in App.tsx
       navigate('/dashboard');
-    } catch (error) {
-      toast.error('Authentication Error: Uplink Failed');
+    } catch (error: any) {
+      toast.error(error.message || 'Authentication Error: Uplink Failed');
     } finally {
       setLoading(false);
     }

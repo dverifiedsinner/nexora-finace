@@ -15,6 +15,7 @@ import {
 import { cn, formatCurrency } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../../lib/supabase';
 
 interface Question {
   id: string;
@@ -91,7 +92,12 @@ const COURSES: Course[] = [
   }
 ];
 
-export default function CoursesPage({ user }: { user: any }) {
+interface CoursesPageProps {
+  user: any;
+  refreshProfile: () => Promise<void>;
+}
+
+export default function CoursesPage({ user, refreshProfile }: CoursesPageProps) {
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [activeQuiz, setActiveQuiz] = useState<Course | null>(null);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -99,24 +105,81 @@ export default function CoursesPage({ user }: { user: any }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showResult, setShowResult] = useState(false);
 
-  const handlePurchase = (courseId: string) => {
+  const handlePurchase = async (courseId: string) => {
+    const course = COURSES.find(c => c.id === courseId);
+    if (!course) return;
+
+    if (user.wallet.main < course.price) {
+      toast.error('Insufficient funds in main wallet to deploy this portfolio');
+      return;
+    }
+
     setPurchasing(courseId);
-    setTimeout(() => {
-      setPurchasing(null);
-      const course = COURSES.find(c => c.id === courseId);
-      if (course) {
-        setActiveQuiz(course);
-        setCurrentQuestionIndex(0);
-        setLiveEarning(0);
-        setShowResult(false);
-      }
+    
+    try {
+      // 1. Deduct price from main wallet
+      const newWallet = { ...user.wallet };
+      newWallet.main -= course.price;
+
+      const { error: walletError } = await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      if (walletError) throw walletError;
+
+      // 2. Refresh profile
+      await refreshProfile();
+
       toast.success('Skill Invest secured! Activation quiz unlocked.');
-    }, 2000);
+      setActiveQuiz(course);
+      setCurrentQuestionIndex(0);
+      setLiveEarning(0);
+      setShowResult(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Deployment Failed');
+    } finally {
+      setPurchasing(null);
+    }
+  };
+
+  const handleFinishQuiz = async () => {
+    if (!user || !activeQuiz) return;
+    setIsSubmitting(true);
+    
+    try {
+      // Add liveEarning to bonus wallet
+      const newWallet = { ...user.wallet };
+      newWallet.bonus += liveEarning;
+
+      const { error: walletError } = await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      if (walletError) throw walletError;
+
+      // Log quiz completion
+      await supabase.from('user_quizzes').insert({
+        user_id: user.id,
+        course_id: activeQuiz.id,
+        score: liveEarning,
+        completed_at: new Date().toISOString()
+      });
+
+      await refreshProfile();
+      setShowResult(true);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to finalize rewards');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleAnswer = (optionIndex: number) => {
     if (!activeQuiz) return;
     
+    const activeCourseQuiz = activeQuiz.quiz || [];
     const currentQuestion = activeCourseQuiz[currentQuestionIndex];
     const earningPerQuestion = activeQuiz.maxEarning / (activeQuiz.quiz?.length || 10);
     
@@ -128,10 +191,10 @@ export default function CoursesPage({ user }: { user: any }) {
       toast.error('Protocol Error: Correction Cycle Initialized', { duration: 1000 });
     }
 
-    if (currentQuestionIndex < (activeQuiz.quiz?.length || 10) - 1) {
+    if (currentQuestionIndex < activeCourseQuiz.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
     } else {
-      setShowResult(true);
+      handleFinishQuiz();
     }
   };
 

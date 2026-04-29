@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   CheckCircle2, 
   Zap, 
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 
 interface Task {
   id: string;
@@ -30,22 +31,75 @@ const TASKS: Task[] = [
   { id: '6', title: 'Join Official Telegram', reward: 300, type: 'Social', provider: 'Official', timeLimit: '2 mins', category: 'Social Media' },
 ];
 
-export default function TasksPage({ user }: { user: any }) {
+interface TasksPageProps {
+  user: any;
+  refreshProfile: () => Promise<void>;
+}
+
+export default function TasksPage({ user, refreshProfile }: TasksPageProps) {
   const [activeTab, setActiveTab] = useState('All');
   const [claimedTasks, setClaimedTasks] = useState<string[]>([]);
   const [claiming, setClaiming] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchClaimedTasks = async () => {
+      if (!user) return;
+      const { data, error } = await supabase
+        .from('user_tasks')
+        .select('task_id')
+        .eq('user_id', user.id);
+      
+      if (data) {
+        setClaimedTasks(data.map(t => t.task_id));
+      }
+    };
+    fetchClaimedTasks();
+  }, [user]);
 
   const filteredTasks = activeTab === 'All' 
     ? TASKS 
     : TASKS.filter(task => task.type === activeTab);
 
-  const handleClaim = (taskId: string) => {
-    setClaiming(taskId);
-    setTimeout(() => {
-      setClaimedTasks([...claimedTasks, taskId]);
+  const handleClaim = async (task: Task) => {
+    setClaiming(task.id);
+    
+    try {
+      // 1. Log task completion
+      const { error: taskError } = await supabase
+        .from('user_tasks')
+        .insert({
+          user_id: user.id,
+          task_id: task.id,
+          reward: task.reward,
+          completed_at: new Date().toISOString()
+        });
+
+      if (taskError) {
+         if (taskError.code === '23505') { // Unique violation
+           throw new Error('Task already claimed');
+         }
+         throw taskError;
+      }
+
+      // 2. Add reward to bonus wallet
+      const newWallet = { ...user.wallet };
+      newWallet.bonus += task.reward;
+
+      const { error: walletError } = await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      if (walletError) throw walletError;
+
+      setClaimedTasks([...claimedTasks, task.id]);
+      await refreshProfile();
+      toast.success('Task claim successful! Reward added to bonus wallet.');
+    } catch (error: any) {
+      toast.error(error.message || 'Task Claim Failed');
+    } finally {
       setClaiming(null);
-      toast.success('Task claim initiated! Reward will be added to bonus wallet after verification.');
-    }, 1500);
+    }
   };
 
   return (
@@ -137,7 +191,7 @@ export default function TasksPage({ user }: { user: any }) {
 
                 <div className="flex items-center gap-4 relative z-10">
                   <button 
-                    onClick={() => handleClaim(task.id)}
+                    onClick={() => handleClaim(task)}
                     disabled={isProcessing || isClaimed}
                     className={cn(
                       "flex-1 py-5 px-6 rounded-[24px] font-display font-black uppercase text-xs tracking-widest transition-all shadow-xl active:scale-95",

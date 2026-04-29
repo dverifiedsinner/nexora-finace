@@ -16,6 +16,7 @@ import {
 import { cn, formatCurrency } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
+import { supabase } from '../../lib/supabase';
 
 const VIRTUAL_GAMES = [
   { id: 'v1', league: 'SkillVest Premier', home: 'Lagos Lions', away: 'Abuja Aces', odds: { home: 2.1, draw: 3.2, away: 2.5 } },
@@ -25,7 +26,12 @@ const VIRTUAL_GAMES = [
   { id: 'v5', league: 'Champions Alpha', home: 'Owerri Owls', away: 'Kaduna Knights', odds: { home: 2.0, draw: 3.3, away: 2.7 } },
 ];
 
-export default function GamificationPage({ user }: { user: any }) {
+interface GamificationPageProps {
+  user: any;
+  refreshProfile: () => Promise<void>;
+}
+
+export default function GamificationPage({ user, refreshProfile }: GamificationPageProps) {
   const [isSpinning, setIsSpinning] = useState(false);
   const [spinResult, setSpinResult] = useState<string | null>(null);
   
@@ -54,7 +60,7 @@ export default function GamificationPage({ user }: { user: any }) {
     }
   };
 
-  const handlePlaceBet = () => {
+  const handlePlaceBet = async () => {
     if (betSlip.length === 0) {
       toast.error('Select at least one game!');
       return;
@@ -70,9 +76,33 @@ export default function GamificationPage({ user }: { user: any }) {
       return;
     }
 
-    setResult(null);
     setIsProcessing(true);
-    setCountdown(30);
+    
+    try {
+      // 1. Deduct stake
+      const newWallet = { ...user.wallet };
+      if (newWallet.main >= stakeNum) {
+        newWallet.main -= stakeNum;
+      } else {
+        const remaining = stakeNum - newWallet.main;
+        newWallet.main = 0;
+        newWallet.bonus -= remaining;
+      }
+
+      const { error: walletError } = await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      if (walletError) throw walletError;
+
+      await refreshProfile();
+      setResult(null);
+      setCountdown(30);
+    } catch (error: any) {
+      toast.error(error.message || 'Transaction Error');
+      setIsProcessing(false);
+    }
   };
 
   useEffect(() => {
@@ -80,48 +110,96 @@ export default function GamificationPage({ user }: { user: any }) {
     if (countdown !== null && countdown > 0) {
       timer = setTimeout(() => setCountdown(countdown - 1), 1000);
     } else if (countdown === 0) {
-      // Simulate Results
-      const won = Math.random() > 0.7; // 30% win chance for demo
-      const winAmount = won ? potentialWin : 0;
-      
-      const gameDetails = betSlip.map(s => {
-        const game = VIRTUAL_GAMES.find(g => g.id === s.id);
-        const actual = ['HOME', 'DRAW', 'AWAY'][Math.floor(Math.random() * 3)];
-        return `${game?.home} vs ${game?.away}: ${actual} (${actual === s.selection ? '✅' : '❌'})`;
-      });
-
-      setResult({
-        won,
-        amount: winAmount,
-        details: gameDetails
-      });
-      setIsProcessing(false);
-      setCountdown(null);
-      if (won) {
-        toast.success(`BOOM! You won ${formatCurrency(winAmount)}!`, { duration: 5000, icon: '🔥' });
-      } else {
-        toast.error('Ouch! Better luck in the next round.');
-      }
-      setBetSlip([]);
+      handleBetResult();
     }
     return () => clearTimeout(timer);
   }, [countdown]);
 
-  const handleSpin = () => {
+  const handleBetResult = async () => {
+    const won = Math.random() > 0.7; // 30% win chance for demo
+    const winAmount = won ? potentialWin : 0;
+    
+    const gameDetails = betSlip.map(s => {
+      const game = VIRTUAL_GAMES.find(g => g.id === s.id);
+      const actual = ['HOME', 'DRAW', 'AWAY'][Math.floor(Math.random() * 3)];
+      return `${game?.home} vs ${game?.away}: ${actual} (${actual === s.selection ? '✅' : '❌'})`;
+    });
+
+    if (won) {
+      try {
+        const newWallet = { ...user.wallet };
+        newWallet.main += winAmount;
+
+        await supabase
+          .from('profiles')
+          .update({ wallet: newWallet })
+          .eq('id', user.id);
+        
+        await refreshProfile();
+        toast.success(`BOOM! You won ${formatCurrency(winAmount)}!`, { duration: 5000, icon: '🔥' });
+      } catch (err) {
+        console.error('Error crediting win:', err);
+      }
+    } else {
+      toast.error('Ouch! Better luck in the next round.');
+    }
+
+    setResult({
+      won,
+      amount: winAmount,
+      details: gameDetails
+    });
+    setIsProcessing(false);
+    setCountdown(null);
+    setBetSlip([]);
+  };
+
+  const handleSpin = async () => {
     if (user.wallet.bonus < 100) {
       toast.error('Insufficient bonus funds! Minimum ₦100 required per spin.');
       return;
     }
+    
     setIsSpinning(true);
     setSpinResult(null);
-    setTimeout(() => {
+    
+    try {
+      // 1. Deduct 100 from bonus
+      const newWallet = { ...user.wallet };
+      newWallet.bonus -= 100;
+
+      await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      // Simulating spin animation delay
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
       const results = ['₦500 Cash', '₦1000 Bonus', 'Free Course', 'Try Again', '₦250 Referral'];
       const win = results[Math.floor(Math.random() * results.length)];
+      
+      // Credit reward
+      if (win.includes('Cash')) {
+        newWallet.main += 500;
+        await supabase.from('profiles').update({ wallet: newWallet }).eq('id', user.id);
+      } else if (win.includes('Bonus')) {
+        newWallet.bonus += 1000;
+        await supabase.from('profiles').update({ wallet: newWallet }).eq('id', user.id);
+      } else if (win.includes('Referral')) {
+        newWallet.referral += 250;
+        await supabase.from('profiles').update({ wallet: newWallet }).eq('id', user.id);
+      }
+
+      await refreshProfile();
       setSpinResult(win);
-      setIsSpinning(false);
       if (win === 'Try Again') toast.error('Better luck next time!');
       else toast.success(`Congratulations! You won ${win}`, { icon: '🎉' });
-    }, 3000);
+    } catch (error: any) {
+      toast.error('Spin Failed');
+    } finally {
+      setIsSpinning(false);
+    }
   };
 
   return (

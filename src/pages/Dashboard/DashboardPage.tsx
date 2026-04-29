@@ -60,9 +60,10 @@ const FEATURED_COURSES = [
 
 interface DashboardPageProps {
   user: any;
+  refreshProfile: () => Promise<void>;
 }
 
-export default function DashboardPage({ user }: DashboardPageProps) {
+export default function DashboardPage({ user, refreshProfile }: DashboardPageProps) {
   const [featuredIndex, setFeaturedIndex] = useState(0);
 
   useEffect(() => {
@@ -72,11 +73,13 @@ export default function DashboardPage({ user }: DashboardPageProps) {
     return () => clearInterval(timer);
   }, []);
 
+  if (!user) return null;
+
   const wallets = [
-    { title: 'Main Wallet', amount: user.wallet.main, icon: Wallet, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
-    { title: 'Bonus Wallet', amount: user.wallet.bonus, icon: Gift, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
-    { title: 'Referral Wallet', amount: user.wallet.referral, icon: Users, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
-    { title: 'Investment Wallet', amount: user.wallet.investment, icon: Briefcase, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
+    { title: 'Main Wallet', amount: user.wallet?.main || 0, icon: Wallet, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
+    { title: 'Bonus Wallet', amount: user.wallet?.bonus || 0, icon: Gift, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
+    { title: 'Referral Wallet', amount: user.wallet?.referral || 0, icon: Users, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
+    { title: 'Investment Wallet', amount: user.wallet?.investment || 0, icon: Briefcase, color: 'bg-gold', text: 'text-navy', shadow: 'shadow-gold/20' },
   ];
 
   return (
@@ -297,8 +300,16 @@ export default function DashboardPage({ user }: DashboardPageProps) {
             <h3 className="text-3xl font-display font-black uppercase italic leading-none mb-3">Viral Protocol</h3>
             <p className="text-navy font-bold text-sm max-w-[240px] opacity-80">Earn ₦2,000 for every active affiliate deployed into the network.</p>
             <div className="mt-8 flex items-center gap-3">
-              <div className="bg-navy/10 border border-navy/10 px-6 py-3 rounded-2xl font-display font-black tracking-widest text-lg">{user.referralCode}</div>
-              <button className="bg-navy text-white px-6 py-3 rounded-2xl font-display font-bold uppercase text-xs tracking-widest hover:bg-navy/90 active:scale-95 shadow-xl">Copy</button>
+              <div className="bg-navy/10 border border-navy/10 px-6 py-3 rounded-2xl font-display font-black tracking-widest text-lg">{user.referral_code || user.referralCode}</div>
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(user.referral_code || user.referralCode || '');
+                  toast.success('Protocol ID Copied');
+                }}
+                className="bg-navy text-white px-6 py-3 rounded-2xl font-display font-bold uppercase text-xs tracking-widest hover:bg-navy/90 active:scale-95 shadow-xl"
+              >
+                Copy
+              </button>
             </div>
           </div>
           <Users size={120} className="text-navy/10 absolute -right-6 -bottom-6 rotate-12" />

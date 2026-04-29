@@ -16,10 +16,11 @@ import {
 } from 'lucide-react';
 import { cn, formatCurrency } from '../../lib/utils';
 import { toast } from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 
 interface ProfilePageProps {
   user: any;
-  onUpdateUser?: (updatedUser: any) => void;
+  onUpdateUser?: () => Promise<void>;
 }
 
 export default function ProfilePage({ user, onUpdateUser }: ProfilePageProps) {
@@ -28,37 +29,45 @@ export default function ProfilePage({ user, onUpdateUser }: ProfilePageProps) {
   const [loading, setLoading] = useState(false);
 
   const [formData, setFormData] = useState({
-    displayName: user?.displayName || '',
+    displayName: user?.display_name || user?.displayName || '',
     email: user?.email || '',
-    accountNumber: user?.bankProfile?.accountNumber || '',
-    bankName: user?.bankProfile?.bankName || '',
-    accountName: user?.bankProfile?.accountName || '',
+    accountNumber: user?.bank_profile?.accountNumber || '',
+    bankName: user?.bank_profile?.bankName || '',
+    accountName: user?.bank_profile?.accountName || '',
   });
 
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    const updatedUser = {
-      ...user,
-      displayName: formData.displayName,
-      bankProfile: {
-        ...user.bankProfile,
-        accountNumber: formData.accountNumber,
-        bankName: formData.bankName,
-        accountName: formData.accountName,
-      }
-    };
+    try {
+      const updates = {
+        display_name: formData.displayName,
+        bank_profile: {
+          accountNumber: formData.accountNumber,
+          bankName: formData.bankName,
+          accountName: formData.accountName,
+        }
+      };
 
-    onUpdateUser?.(updatedUser);
-    localStorage.setItem('nezora_user', JSON.stringify(updatedUser));
-    
-    toast.success('Profile Matrix Synchronized');
-    setIsEditing(false);
-    setLoading(false);
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', user.id);
+
+      if (error) throw error;
+      
+      if (onUpdateUser) {
+        await onUpdateUser();
+      }
+      
+      toast.success('Profile Matrix Synchronized');
+      setIsEditing(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Sync Failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const copyReferral = () => {

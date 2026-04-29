@@ -17,8 +17,14 @@ import {
 import { cn, formatCurrency } from '../../lib/utils';
 import { motion } from 'motion/react';
 import { toast } from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 
-export default function WalletPage({ user }: { user: any }) {
+interface WalletPageProps {
+  user: any;
+  refreshProfile: () => Promise<void>;
+}
+
+export default function WalletPage({ user, refreshProfile }: WalletPageProps) {
   const [activeTab, setActiveTab] = useState('Top-up');
   const [billType, setBillType] = useState<'airtime' | 'data' | null>(null);
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -26,13 +32,55 @@ export default function WalletPage({ user }: { user: any }) {
   const [fundingAmount, setFundingAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleAction = () => {
+  const handleAction = async () => {
+    if (!fundingAmount || isNaN(Number(fundingAmount))) {
+      toast.error('Please enter a valid amount');
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      toast.success(`${activeTab} request submitted successfully!`);
+    const amount = Number(fundingAmount);
+    
+    try {
+      const currentWallet = { ...user.wallet };
+      let newWallet = { ...currentWallet };
+
+      if (activeTab === 'Top-up') {
+        newWallet.main += amount;
+      } else if (activeTab === 'Withdraw' || activeTab === 'Bill Payment') {
+        if (currentWallet.main < amount) {
+          throw new Error('Insufficient funds in main wallet');
+        }
+        newWallet.main -= amount;
+      }
+
+      // Update in Supabase
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ wallet: newWallet })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      // Log transaction if table exists (optional, but good practice)
+      await supabase.from('transactions').insert({
+        user_id: user.id,
+        amount: amount,
+        type: activeTab === 'Top-up' ? 'credit' : 'debit',
+        description: `${activeTab} - ${billType || 'Wallet Adjustment'}`,
+        wallet: 'main',
+        timestamp: new Date().toISOString()
+      });
+
+      await refreshProfile();
+      toast.success(`${activeTab} request executed successfully!`);
       setFundingAmount('');
-    }, 2000);
+      setPhoneNumber('');
+    } catch (error: any) {
+      toast.error(error.message || 'Transaction Failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
