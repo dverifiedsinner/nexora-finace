@@ -1,0 +1,66 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User account data and wallet balances",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "wallet": {
+          "type": "object",
+          "properties": {
+            "main": { "type": "number" },
+            "bonus": { "type": "number" },
+            "referral": { "type": "number" },
+            "investment": { "type": "number" }
+          }
+        },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "displayName", "wallet", "referralCode", "role", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Available earning task",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "reward": { "type": "number" },
+        "type": { "type": "string", "enum": ["Daily", "Social", "Special"] },
+        "status": { "type": "string" }
+      }
+    },
+    "Transaction": {
+      "title": "Wallet Transaction",
+      "description": "Log of financial activity",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["credit", "debit"] },
+        "wallet": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Primary user documents"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Global task inventory"
+    },
+    "/transactions/{txnId}": {
+      "schema": "Transaction",
+      "description": "Financial logs"
+    }
+  }
+}
